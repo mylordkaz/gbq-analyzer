@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	"cloud.google.com/go/bigquery"
 	"github.com/olekukonko/tablewriter"
@@ -101,5 +102,115 @@ func (c *Client) ExecuteQuery(sql string, limit int) error {
 	table.Render()
 	fmt.Printf("\nRows returned: %d\n", rowCount)
 	return nil
+}
 
+func (c *Client) ListDatasets() error {
+	// Create a client specifically for the public data project
+	publicClient, err := bigquery.NewClient(c.ctx, "bigquery-public-data")
+	if err != nil {
+		return fmt.Errorf("failed to create public data client: %v", err)
+	}
+	defer publicClient.Close()
+
+	fmt.Println("=== Available Public Datasets ===")
+	it := publicClient.Datasets(c.ctx)
+
+	count := 0
+	for {
+		dataset, err := it.Next()
+		if err != nil {
+			break
+		}
+		if err != nil {
+			return fmt.Errorf("error listing public datasets: %v", err)
+		}
+		fmt.Printf("- bigquery-public-data.%s\n", dataset.DatasetID)
+		count++
+
+		// Limit output since there are many
+		if count >= 20 {
+			fmt.Println("... (showing first 20, there are many more)")
+			break
+		}
+	}
+
+	return nil
+}
+
+func (c *Client) ListTables(datasetID string) error {
+	fmt.Printf("Accessing dataset: %s\n", datasetID)
+
+	var dataset *bigquery.Dataset
+
+	// If it's a public dataset, create client for that project
+	if strings.HasPrefix(datasetID, "bigquery-public-data.") {
+		publicClient, err := bigquery.NewClient(c.ctx, "bigquery-public-data")
+		if err != nil {
+			return fmt.Errorf("failed to create public data client: %v", err)
+		}
+		defer publicClient.Close()
+
+		// Remove the project prefix to get just the dataset name
+		datasetName := strings.TrimPrefix(datasetID, "bigquery-public-data.")
+		dataset = publicClient.Dataset(datasetName)
+	} else {
+		// Use your own project's client
+		dataset = c.client.Dataset(datasetID)
+	}
+
+	it := dataset.Tables(c.ctx)
+
+	fmt.Printf("Tables in dataset '%s':\n", datasetID)
+	count := 0
+	for {
+		table, err := it.Next()
+		if err != nil {
+			break
+		}
+		if err != nil {
+			return fmt.Errorf("error listing tables: %v", err)
+		}
+		fmt.Printf("- %s\n", table.TableID)
+		count++
+	}
+
+	if count == 0 {
+		fmt.Println("No tables found")
+	}
+
+	return nil
+}
+
+func (c *Client) DescribeTable(datasetID, tableID string) error {
+	var dataset *bigquery.Dataset
+
+	if strings.HasPrefix(datasetID, "bigquery-public-data.") {
+		publicClient, err := bigquery.NewClient(c.ctx, "bigquery-public-data")
+		if err != nil {
+			return fmt.Errorf("failed to create public data client: %v", err)
+		}
+		defer publicClient.Close()
+
+		datasetName := strings.TrimPrefix(datasetID, "bigquery-public-data.")
+		dataset = publicClient.Dataset(datasetName)
+	} else {
+		dataset = c.client.Dataset(datasetID)
+	}
+
+	table := dataset.Table(tableID)
+	metadata, err := table.Metadata(c.ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get table metadata %v:", err)
+	}
+
+	fmt.Printf("\nTable: %s.%s\n", datasetID, tableID)
+	fmt.Printf("Description: %s\n", metadata.Description)
+	fmt.Printf("Rows: %d\n", metadata.NumRows)
+	fmt.Printf("Size: %d bytes\n", metadata.NumBytes)
+
+	fmt.Println("\nSchema")
+	for _, field := range metadata.Schema {
+		fmt.Printf(" %s (%s) - %s\n", field.Name, field.Type, field.Description)
+	}
+	return nil
 }
