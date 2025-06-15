@@ -8,6 +8,7 @@ import (
 
 	"cloud.google.com/go/bigquery"
 	"github.com/olekukonko/tablewriter"
+	"google.golang.org/api/iterator"
 )
 
 type Client struct {
@@ -18,6 +19,10 @@ type Client struct {
 
 func NewClient(projectID string) (*Client, error) {
 	ctx := context.Background()
+
+	if projectID == "" {
+		projectID = "bigquery-public-data"
+	}
 
 	client, err := bigquery.NewClient(ctx, projectID)
 	if err != nil {
@@ -118,7 +123,7 @@ func (c *Client) ListDatasets() error {
 	count := 0
 	for {
 		dataset, err := it.Next()
-		if err != nil {
+		if err == iterator.Done {
 			break
 		}
 		if err != nil {
@@ -138,8 +143,6 @@ func (c *Client) ListDatasets() error {
 }
 
 func (c *Client) ListTables(datasetID string) error {
-	fmt.Printf("Accessing dataset: %s\n", datasetID)
-
 	var dataset *bigquery.Dataset
 
 	// If it's a public dataset, create client for that project
@@ -164,7 +167,7 @@ func (c *Client) ListTables(datasetID string) error {
 	count := 0
 	for {
 		table, err := it.Next()
-		if err != nil {
+		if err == iterator.Done {
 			break
 		}
 		if err != nil {
@@ -211,6 +214,28 @@ func (c *Client) DescribeTable(datasetID, tableID string) error {
 	fmt.Println("\nSchema")
 	for _, field := range metadata.Schema {
 		fmt.Printf(" %s (%s) - %s\n", field.Name, field.Type, field.Description)
+	}
+	return nil
+}
+
+func (c *Client) ListPrivateDatasets() error {
+	fmt.Printf("=== Datasets in project: %s ===\n", c.projectID)
+	it := c.client.Datasets(c.ctx)
+
+	count := 0
+	for {
+		dataset, err := it.Next()
+		if err != nil {
+			break
+		}
+		fmt.Printf("- %s\n", dataset.DatasetID)
+		count++
+	}
+
+	if count == 0 {
+		fmt.Println("No datasets found in this project")
+	} else {
+		fmt.Printf("\nTotal datasets: %d\n", count)
 	}
 	return nil
 }
