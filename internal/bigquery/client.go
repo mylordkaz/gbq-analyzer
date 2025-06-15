@@ -73,9 +73,10 @@ func (c *Client) ExecuteQuery(sql string, limit int) error {
 			break
 		}
 		if !headerSet {
-			headers := make([]string, len(row))
-			for i := range row {
-				headers[i] = fmt.Sprintf("Column_%d", i+1)
+			schema := it.Schema
+			headers := make([]string, len(schema))
+			for i, field := range schema {
+				headers[i] = field.Name
 			}
 			table.Header(headers)
 			headerSet = true
