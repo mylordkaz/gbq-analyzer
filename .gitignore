@@ -1,0 +1,11 @@
+# Binaries
+gbq-analyzer
+*.exe
+
+# Go workspace
+vendor/
+.env
+
+# IDE files
+.vscode/
+.idea/
