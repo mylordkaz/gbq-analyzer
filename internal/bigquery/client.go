@@ -40,6 +40,25 @@ func (c *Client) Close() error {
 	return c.client.Close()
 }
 
+// Helpers
+func (c *Client) isPublicDataset(datasetID string) bool {
+	return strings.HasPrefix(datasetID, "bigquery-public-data.")
+}
+
+func (c *Client) getDatasetReference(datasetID string) (*bigquery.Dataset, func(), error) {
+	if c.isPublicDataset(datasetID) {
+		publicClient, err := bigquery.NewClient(c.ctx, "bigquery-public-data")
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to create public data client: %v", err)
+		}
+
+		datasetName := strings.TrimPrefix(datasetID, "bigquery-public-data.")
+		cleanup := func() { publicClient.Close() }
+		return publicClient.Dataset(datasetName), cleanup, nil
+	}
+	return c.client.Dataset(datasetID), func() {}, nil
+}
+
 // Test query to verify connection
 func (c *Client) TestConnection() error {
 	query := c.client.Query("SELECT 1 as test_value")
@@ -143,27 +162,15 @@ func (c *Client) ListDatasets() error {
 }
 
 func (c *Client) ListTables(datasetID string) error {
-	var dataset *bigquery.Dataset
-
-	// If it's a public dataset, create client for that project
-	if strings.HasPrefix(datasetID, "bigquery-public-data.") {
-		publicClient, err := bigquery.NewClient(c.ctx, "bigquery-public-data")
-		if err != nil {
-			return fmt.Errorf("failed to create public data client: %v", err)
-		}
-		defer publicClient.Close()
-
-		// Remove the project prefix to get just the dataset name
-		datasetName := strings.TrimPrefix(datasetID, "bigquery-public-data.")
-		dataset = publicClient.Dataset(datasetName)
-	} else {
-		// Use your own project's client
-		dataset = c.client.Dataset(datasetID)
+	dataset, cleanup, err := c.getDatasetReference(datasetID)
+	if err != nil {
+		return err
 	}
+	defer cleanup()
 
 	it := dataset.Tables(c.ctx)
-
 	fmt.Printf("Tables in dataset '%s':\n", datasetID)
+
 	count := 0
 	for {
 		table, err := it.Next()
@@ -185,20 +192,11 @@ func (c *Client) ListTables(datasetID string) error {
 }
 
 func (c *Client) DescribeTable(datasetID, tableID string) error {
-	var dataset *bigquery.Dataset
-
-	if strings.HasPrefix(datasetID, "bigquery-public-data.") {
-		publicClient, err := bigquery.NewClient(c.ctx, "bigquery-public-data")
-		if err != nil {
-			return fmt.Errorf("failed to create public data client: %v", err)
-		}
-		defer publicClient.Close()
-
-		datasetName := strings.TrimPrefix(datasetID, "bigquery-public-data.")
-		dataset = publicClient.Dataset(datasetName)
-	} else {
-		dataset = c.client.Dataset(datasetID)
+	dataset, cleanup, err := c.getDatasetReference(datasetID)
+	if err != nil {
+		return err
 	}
+	defer cleanup()
 
 	table := dataset.Table(tableID)
 	metadata, err := table.Metadata(c.ctx)
