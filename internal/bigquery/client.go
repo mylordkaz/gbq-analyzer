@@ -237,3 +237,61 @@ func (c *Client) ListPrivateDatasets() error {
 	}
 	return nil
 }
+
+func (c *Client) AnalyzeTable(datasetID, tableID string) error {
+	// Get the schema
+	dataset, cleanup, err := c.getDatasetReference(datasetID)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+
+	table := dataset.Table(tableID)
+	metadata, err := table.Metadata(c.ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get table metadata: %v", err)
+	}
+
+	fullTableName := fmt.Sprintf("`%s.%s`", datasetID, tableID)
+
+	fmt.Printf("🔍 Analyzing table: %s\n", fullTableName)
+	fmt.Printf("Rows: %d | Size: %d bytes\n\n", metadata.NumRows, metadata.NumBytes)
+
+	// 1. Basic count
+	fmt.Println("📊 Row count:")
+	countQuery := fmt.Sprintf("SELECT COUNT(*) as total_rows FROM %s", fullTableName)
+	c.ExecuteQuery(countQuery, 1)
+
+	// 2. Find date/timestamp columns and show date range
+	for _, field := range metadata.Schema {
+		if field.Type == bigquery.DateTimeFieldType || field.Type == bigquery.DateFieldType || field.Type == bigquery.TimestampFieldType {
+			fmt.Printf("\n📅 Date range for %s:\n", field.Name)
+			dateQuery := fmt.Sprintf(`
+				SELECT 
+					MIN(%s) as earliest,
+					MAX(%s) as latest,
+					COUNT(DISTINCT DATE(%s)) as unique_days
+				FROM %s`, field.Name, field.Name, field.Name, fullTableName)
+			c.ExecuteQuery(dateQuery, 1)
+			break
+		}
+	}
+
+	for _, field := range metadata.Schema {
+		if field.Type == bigquery.IntegerFieldType {
+			fmt.Printf("\n🔢 Statistics for %s:\n", field.Name)
+			statsQuery := fmt.Sprintf(`
+			SELECT 
+				MIN(%s) as min_value,
+				MAX(%s) as max_value,
+				AVG(%s) as avg_value,
+				COUNT(DISTINCT %s) as unique_values
+			FROM %s
+			WHERE %s IS NOT NULL`, field.Name, field.Name, field.Name, field.Name, fullTableName, field.Name)
+			c.ExecuteQuery(statsQuery, 1)
+			break
+		}
+	}
+
+	return nil
+}
